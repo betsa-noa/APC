@@ -1,3 +1,7 @@
-main.c:67:5:main	16	static
-main.c:125:13:MX_GPIO_Init	32	static
-main.c:152:6:Error_Handler	4	static,ignoring_inline_asm
+main.c:100:5:main	48	static
+main.c:186:6:MX_ETH_Init	8	static
+main.c:235:6:MX_USART3_UART_Init	8	static
+main.c:283:13:MX_GPIO_Init	32	static
+main.c:313:6:StartDefaultTask	16	static
+main.c:333:6:HAL_TIM_PeriodElapsedCallback	16	static
+main.c:350:6:Error_Handler	4	static,ignoring_inline_asm
