@@ -24,7 +24,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "BMP180.h"
+#include "queue.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -73,16 +74,31 @@ ETH_TxPacketConfig TxConfig;
 
 ETH_HandleTypeDef heth;
 
+I2C_HandleTypeDef hi2c1;
+
 UART_HandleTypeDef huart3;
 
 osThreadId defaultTaskHandle;
+osThreadId LeerSensorHandle;
+osThreadId controlTaskHandle;
+osMessageQId lecturaSensorHandle;
+osMessageQId compresorQueueHandle;
+osMessageQId valvulaQueueHandle;
 /* USER CODE BEGIN PV */
+
+QueueHandle_t compresor2Handle;
+QueueHandle_t controlQueueHandle;
+QueueHandle_t valvula2Handle;
+MessageBufferHandle_t control2cm7;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 static void MX_GPIO_Init(void);
+static void MX_I2C1_Init(void);
 void StartDefaultTask(void const * argument);
+void LeerSensor_Init(void const * argument);
+void control_Init(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -133,6 +149,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -149,14 +166,39 @@ int main(void)
   /* start timers, add new ones, ... */
   /* USER CODE END RTOS_TIMERS */
 
+  /* Create the queue(s) */
+  /* definition and creation of lecturaSensor */
+  osMessageQDef(lecturaSensor, 16, uint16_t);
+  lecturaSensorHandle = osMessageCreate(osMessageQ(lecturaSensor), NULL);
+
+  /* definition and creation of compresorQueue */
+  osMessageQDef(compresorQueue, 16, uint16_t);
+  compresorQueueHandle = osMessageCreate(osMessageQ(compresorQueue), NULL);
+
+  /* definition and creation of valvulaQueue */
+  osMessageQDef(valvulaQueue, 16, uint16_t);
+  valvulaQueueHandle = osMessageCreate(osMessageQ(valvulaQueue), NULL);
+
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
+  compresor2Handle = xQueueCreate(1, sizeof(int));
+  controlQueueHandle = xQueueCreate(1, sizeof(int));
+  valvula2Handle = xQueueCreate(1, sizeof(int));
+  control2cm7=xMessageBufferCreate( sizeof(int) );
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
   /* definition and creation of defaultTask */
   osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
+
+  /* definition and creation of LeerSensor */
+  osThreadDef(LeerSensor, LeerSensor_Init, osPriorityHigh, 0, 128);
+  LeerSensorHandle = osThreadCreate(osThread(LeerSensor), NULL);
+
+  /* definition and creation of controlTask */
+  osThreadDef(controlTask, control_Init, osPriorityIdle, 0, 128);
+  controlTaskHandle = osThreadCreate(osThread(controlTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -228,6 +270,52 @@ void MX_ETH_Init(void)
 }
 
 /**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x307075B1;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
   * @brief USART3 Initialization Function
   * @param None
   * @retval None
@@ -286,6 +374,7 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOG_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOG, GPIO_PIN_14, GPIO_PIN_RESET);
@@ -320,6 +409,64 @@ void StartDefaultTask(void const * argument)
 	  osDelay(3000);
   }
   /* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_LeerSensor_Init */
+/**
+* @brief Function implementing the LeerSensor thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_LeerSensor_Init */
+void LeerSensor_Init(void const * argument)
+{
+  /* USER CODE BEGIN LeerSensor_Init */
+  float p=0;
+  int go=200;
+  /* Infinite loop */
+  for(;;)
+  {
+	p=BMP180_calculate_true_pressure(0);
+	xQueueSend(controlQueueHandle,&p,0);
+	//Utilizada para can
+
+	//Para llamar a Sensor
+    osDelay(500);
+  }
+  /* USER CODE END LeerSensor_Init */
+}
+
+/* USER CODE BEGIN Header_control_Init */
+/**
+* @brief Function implementing the controlTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_control_Init */
+void control_Init(void const * argument)
+{
+  /* USER CODE BEGIN control_Init */
+  /* Infinite loop */
+  int p=0;
+  int comp=0;
+  int val=0;
+  //Borrar cuando se realize comunicacion CAN
+  int pEsp=10;
+  for(;;)
+  {
+	//Receive queue
+	while(!xQueueReceive(controlQueueHandle,&p,1000));
+	if (p<pEsp){
+		comp=1;
+		val=0;
+	}else if(p>pesp){
+		comp=0;
+		val=1;
+	}
+	xQueueSend(compresor2Handle,&comp,0);
+	xQueueSend(valvula2Handle,&val,0);
+  }
+  /* USER CODE END control_Init */
 }
 
 /**

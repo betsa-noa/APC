@@ -24,7 +24,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "queue.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -78,9 +78,16 @@ UART_HandleTypeDef huart3;
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 osThreadId defaultTaskHandle;
-osThreadId LED1onHandle;
-osThreadId LED2onHandle;
+osThreadId compresorControHandle;
+osThreadId valvulaControlHandle;
+osMessageQId lecturaSensorHandle;
+osMessageQId valvulaQueueHandle;
+osMessageQId compresorQueueHandle;
 /* USER CODE BEGIN PV */
+
+QueueHandle_t compresor2Handle;
+QueueHandle_t controlQueueHandle;
+QueueHandle_t valvula2Handle;
 
 /* USER CODE END PV */
 
@@ -91,8 +98,8 @@ static void MX_ETH_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 void StartDefaultTask(void const * argument);
-void LED1on_Init(void const * argument);
-void LED2on_Init(void const * argument);
+void compresor_Init(void const * argument);
+void valvula_Init(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -179,8 +186,24 @@ Error_Handler();
   /* start timers, add new ones, ... */
   /* USER CODE END RTOS_TIMERS */
 
+  /* Create the queue(s) */
+  /* definition and creation of lecturaSensor */
+  osMessageQDef(lecturaSensor, 16, uint16_t);
+  lecturaSensorHandle = osMessageCreate(osMessageQ(lecturaSensor), NULL);
+
+  /* definition and creation of valvulaQueue */
+  osMessageQDef(valvulaQueue, 16, uint16_t);
+  valvulaQueueHandle = osMessageCreate(osMessageQ(valvulaQueue), NULL);
+
+  /* definition and creation of compresorQueue */
+  osMessageQDef(compresorQueue, 16, uint16_t);
+  compresorQueueHandle = osMessageCreate(osMessageQ(compresorQueue), NULL);
+
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
+  compresor2Handle = xQueueCreate(1, sizeof(int));
+  controlQueueHandle = xQueueCreate(1, sizeof(int));
+  valvula2Handle = xQueueCreate(1, sizeof(int));
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -188,13 +211,13 @@ Error_Handler();
   osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
-  /* definition and creation of LED1on */
-  osThreadDef(LED1on, LED1on_Init, osPriorityNormal, 0, 128);
-  LED1onHandle = osThreadCreate(osThread(LED1on), NULL);
+  /* definition and creation of compresorContro */
+  osThreadDef(compresorContro, compresor_Init, osPriorityNormal, 0, 128);
+  compresorControHandle = osThreadCreate(osThread(compresorContro), NULL);
 
-  /* definition and creation of LED2on */
-  osThreadDef(LED2on, LED2on_Init, osPriorityNormal, 0, 128);
-  LED2onHandle = osThreadCreate(osThread(LED2on), NULL);
+  /* definition and creation of valvulaControl */
+  osThreadDef(valvulaControl, valvula_Init, osPriorityNormal, 0, 128);
+  valvulaControlHandle = osThreadCreate(osThread(valvulaControl), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -454,47 +477,57 @@ void StartDefaultTask(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+	  osDelay(1);
   }
   /* USER CODE END 5 */
 }
 
-/* USER CODE BEGIN Header_LED1on_Init */
+/* USER CODE BEGIN Header_compresor_Init */
 /**
-* @brief Function implementing the LED1on thread.
+* @brief Function implementing the compresorContro thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_LED1on_Init */
-void LED1on_Init(void const * argument)
+/* USER CODE END Header_compresor_Init */
+void compresor_Init(void const * argument)
 {
-  /* USER CODE BEGIN LED1on_Init */
+  /* USER CODE BEGIN compresor_Init */
+  int onOff=0;
   /* Infinite loop */
   for(;;)
   {
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
-	  osDelay(2000);
+	while(!xQueueReceive(compresor2Handle, &onOff, 1000));
+	if (onOff==1){
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+	}else if (onOff==0){
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
+	}
   }
-  /* USER CODE END LED1on_Init */
+  /* USER CODE END compresor_Init */
 }
 
-/* USER CODE BEGIN Header_LED2on_Init */
+/* USER CODE BEGIN Header_valvula_Init */
 /**
-* @brief Function implementing the LED2on thread.
+* @brief Function implementing the valvulaControl thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_LED2on_Init */
-void LED2on_Init(void const * argument)
+/* USER CODE END Header_valvula_Init */
+void valvula_Init(void const * argument)
 {
-  /* USER CODE BEGIN LED2on_Init */
+  /* USER CODE BEGIN valvula_Init */
+  int openClose=0;
   /* Infinite loop */
   for(;;)
   {
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
-	  osDelay(1000);
+    while(!xQueueReceive(valvula2Handle, &openClose, 1000));
+    if (openClose==1){
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+	}else if (openClose==0){
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+	}
   }
-  /* USER CODE END LED2on_Init */
+  /* USER CODE END valvula_Init */
 }
 
 /**

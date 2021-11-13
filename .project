@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <projectDescription>
-	<name>PruebaLED2</name>
+	<name>RelevadorConSensor</name>
 	<comment></comment>
 	<projects>
 	</projects>
@@ -15,7 +15,7 @@
 	</natures>
 	<filteredResources>
 		<filter>
-			<id>1633622624224</id>
+			<id>0</id>
 			<name></name>
 			<type>22</type>
 			<matcher>
