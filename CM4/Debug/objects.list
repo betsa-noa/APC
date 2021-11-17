@@ -1,4 +1,5 @@
 "./Common/Src/system_stm32h7xx_dualcore_boot_cm4_cm7.o"
+"./Core/Src/BMP180.o"
 "./Core/Src/freertos.o"
 "./Core/Src/main.o"
 "./Core/Src/stm32h7xx_hal_msp.o"
@@ -39,3 +40,4 @@
 "./Middlewares/Third_Party/FreeRTOS/stream_buffer.o"
 "./Middlewares/Third_Party/FreeRTOS/tasks.o"
 "./Middlewares/Third_Party/FreeRTOS/timers.o"
+"./Middlewares/ringbuff/src/ringbuff/ringbuff.o"

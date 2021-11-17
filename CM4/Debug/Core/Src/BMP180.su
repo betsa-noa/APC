@@ -1,0 +1,6 @@
+BMP180.c:40:6:BMP180_read_calibration_data	48	static
+BMP180.c:59:10:BMP180_read_uncompensated_temperature	32	static
+BMP180.c:68:7:BMP180_calculate_true_temperature	16	static
+BMP180.c:77:10:BMP180_read_uncompensated_pressure	40	static
+BMP180.c:100:7:BMP180_calculate_true_pressure	24	static
+BMP180.c:121:6:BMP180_Start	8	static

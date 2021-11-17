@@ -42,3 +42,4 @@
 "./Middlewares/Third_Party/FreeRTOS/stream_buffer.o"
 "./Middlewares/Third_Party/FreeRTOS/tasks.o"
 "./Middlewares/Third_Party/FreeRTOS/timers.o"
+"./Middlewares/ringbuff/src/ringbuff/ringbuff.o"

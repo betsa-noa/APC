@@ -24,7 +24,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "queue.h"
+#include "common.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -77,17 +77,13 @@ UART_HandleTypeDef huart3;
 
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
-osThreadId defaultTaskHandle;
-osThreadId compresorControHandle;
+osThreadId bombaControlHandle;
 osThreadId valvulaControlHandle;
-osMessageQId lecturaSensorHandle;
-osMessageQId valvulaQueueHandle;
-osMessageQId compresorQueueHandle;
 /* USER CODE BEGIN PV */
 
-QueueHandle_t compresor2Handle;
-QueueHandle_t controlQueueHandle;
-QueueHandle_t valvula2Handle;
+/* Ringbuffer variables */
+volatile ringbuff_t* bombaAire = (void *)BUFF_CM4_TO_CM7_ADDR;
+volatile ringbuff_t* valvula = (void *)BUFF_CM7_TO_CM4_ADDR;
 
 /* USER CODE END PV */
 
@@ -97,8 +93,7 @@ static void MX_GPIO_Init(void);
 static void MX_ETH_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
-void StartDefaultTask(void const * argument);
-void compresor_Init(void const * argument);
+void bomba_Init(void const * argument);
 void valvula_Init(void const * argument);
 
 /* USER CODE BEGIN PFP */
@@ -121,6 +116,8 @@ int main(void)
   /* USER CODE END 1 */
 /* USER CODE BEGIN Boot_Mode_Sequence_0 */
   int32_t timeout;
+  HAL_RCCEx_EnableBootCore(RCC_BOOT_C2);
+  WAIT_COND_WITH_TIMEOUT(__HAL_RCC_GET_FLAG(RCC_FLAG_D2CKRDY) != RESET, 0xFFFF);
 /* USER CODE END Boot_Mode_Sequence_0 */
 
 /* USER CODE BEGIN Boot_Mode_Sequence_1 */
@@ -144,21 +141,27 @@ int main(void)
   /* Configure the system clock */
   SystemClock_Config();
 /* USER CODE BEGIN Boot_Mode_Sequence_2 */
-/* When system initialization is finished, Cortex-M7 will release Cortex-M4 by means of
-HSEM notification */
-/*HW semaphore Clock enable*/
-__HAL_RCC_HSEM_CLK_ENABLE();
-/*Take HSEM */
-HAL_HSEM_FastTake(HSEM_ID_0);
-/*Release HSEM in order to notify the CPU2(CM4)*/
-HAL_HSEM_Release(HSEM_ID_0,0);
-/* wait until CPU2 wakes up from stop mode */
-timeout = 0xFFFF;
-while((__HAL_RCC_GET_FLAG(RCC_FLAG_D2CKRDY) == RESET) && (timeout-- > 0));
-if ( timeout < 0 )
-{
-Error_Handler();
-}
+  ringbuff_init(valvula, (void *)BUFFDATA_CM7_TO_CM4_ADDR, BUFFDATA_CM7_TO_CM4_LEN);
+  ringbuff_init(bombaAire, (void *)BUFFDATA_CM4_TO_CM7_ADDR, BUFFDATA_CM4_TO_CM7_LEN);
+  /* Wakeup CPU2 */
+	__HAL_RCC_HSEM_CLK_ENABLE();
+	HSEM_TAKE_RELEASE(HSEM_WAKEUP_CPU2);
+	WAIT_COND_WITH_TIMEOUT(__HAL_RCC_GET_FLAG(RCC_FLAG_D2CKRDY) == RESET, 0xFFFF);
+
+
+	/*HW semaphore Clock enable*/
+	__HAL_RCC_HSEM_CLK_ENABLE();
+	/*Take HSEM */
+	HAL_HSEM_FastTake(HSEM_ID_0);
+	/*Release HSEM in order to notify the CPU2(CM4)*/
+	HAL_HSEM_Release(HSEM_ID_0,0);
+	/* wait until CPU2 wakes up from stop mode */
+	timeout = 0xFFFF;
+	while((__HAL_RCC_GET_FLAG(RCC_FLAG_D2CKRDY) == RESET) && (timeout-- > 0));
+	if ( timeout < 0 )
+	{
+	Error_Handler();
+	}
 /* USER CODE END Boot_Mode_Sequence_2 */
 
   /* USER CODE BEGIN SysInit */
@@ -171,7 +174,7 @@ Error_Handler();
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   /* USER CODE BEGIN 2 */
-
+  while (!ringbuff_is_ready(bombaAire) || !ringbuff_is_ready(valvula)) {}
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -186,37 +189,17 @@ Error_Handler();
   /* start timers, add new ones, ... */
   /* USER CODE END RTOS_TIMERS */
 
-  /* Create the queue(s) */
-  /* definition and creation of lecturaSensor */
-  osMessageQDef(lecturaSensor, 16, uint16_t);
-  lecturaSensorHandle = osMessageCreate(osMessageQ(lecturaSensor), NULL);
-
-  /* definition and creation of valvulaQueue */
-  osMessageQDef(valvulaQueue, 16, uint16_t);
-  valvulaQueueHandle = osMessageCreate(osMessageQ(valvulaQueue), NULL);
-
-  /* definition and creation of compresorQueue */
-  osMessageQDef(compresorQueue, 16, uint16_t);
-  compresorQueueHandle = osMessageCreate(osMessageQ(compresorQueue), NULL);
-
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
-  compresor2Handle = xQueueCreate(1, sizeof(int));
-  controlQueueHandle = xQueueCreate(1, sizeof(int));
-  valvula2Handle = xQueueCreate(1, sizeof(int));
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* definition and creation of defaultTask */
-  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
-  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
-
-  /* definition and creation of compresorContro */
-  osThreadDef(compresorContro, compresor_Init, osPriorityNormal, 0, 128);
-  compresorControHandle = osThreadCreate(osThread(compresorContro), NULL);
+  /* definition and creation of bombaControl */
+  osThreadDef(bombaControl, bomba_Init, osPriorityHigh, 0, 128);
+  bombaControlHandle = osThreadCreate(osThread(bombaControl), NULL);
 
   /* definition and creation of valvulaControl */
-  osThreadDef(valvulaControl, valvula_Init, osPriorityNormal, 0, 128);
+  osThreadDef(valvulaControl, valvula_Init, osPriorityHigh, 0, 128);
   valvulaControlHandle = osThreadCreate(osThread(valvulaControl), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
@@ -234,8 +217,6 @@ Error_Handler();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
-
   }
   /* USER CODE END 3 */
 }
@@ -464,46 +445,34 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_StartDefaultTask */
+/* USER CODE BEGIN Header_bomba_Init */
 /**
-  * @brief  Function implementing the defaultTask thread.
+  * @brief  Function implementing the bombaControl thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void const * argument)
+/* USER CODE END Header_bomba_Init */
+void bomba_Init(void const * argument)
 {
   /* USER CODE BEGIN 5 */
+  char *onOff;
+  size_t len;
   /* Infinite loop */
   for(;;)
   {
-	  osDelay(1);
+	//while(!xQueueReceive(compresor2Handle, &onOff, 1000));
+	while ((len = ringbuff_get_linear_block_read_length(bombaAire)) > 0) {
+		onOff = ringbuff_get_linear_block_read_address(bombaAire);
+		if (*onOff=='1'){
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+		}else if (*onOff=='0'){
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
+		}
+		ringbuff_skip(bombaAire, len);
+	}
+	osDelay(100);
   }
   /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_compresor_Init */
-/**
-* @brief Function implementing the compresorContro thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_compresor_Init */
-void compresor_Init(void const * argument)
-{
-  /* USER CODE BEGIN compresor_Init */
-  int onOff=0;
-  /* Infinite loop */
-  for(;;)
-  {
-	while(!xQueueReceive(compresor2Handle, &onOff, 1000));
-	if (onOff==1){
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
-	}else if (onOff==0){
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
-	}
-  }
-  /* USER CODE END compresor_Init */
 }
 
 /* USER CODE BEGIN Header_valvula_Init */
@@ -516,16 +485,22 @@ void compresor_Init(void const * argument)
 void valvula_Init(void const * argument)
 {
   /* USER CODE BEGIN valvula_Init */
-  int openClose=0;
+  char *openClose;
+  size_t len;
   /* Infinite loop */
   for(;;)
   {
-    while(!xQueueReceive(valvula2Handle, &openClose, 1000));
-    if (openClose==1){
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
-	}else if (openClose==0){
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+	//while(!xQueueReceive(valvula2Handle, &openClose, 1000));
+	while ((len = ringbuff_get_linear_block_read_length(valvula)) > 0) {
+		openClose = ringbuff_get_linear_block_read_address(valvula);
+		if (*openClose=='1'){
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+		}else if (*openClose=='0'){
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+		}
+		ringbuff_skip(valvula, len);
 	}
+	osDelay(100);
   }
   /* USER CODE END valvula_Init */
 }

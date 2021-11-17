@@ -1,5 +1,5 @@
 Middlewares/Third_Party/FreeRTOS/timers.o: \
- C:/Users/aremi/STM32CubeIDE/workspace_1.7.0/PruebaLED2/Middlewares/Third_Party/FreeRTOS/Source/timers.c \
+ /Users/TecMonterrey/Documents/STM32CubeSistEmbAvReto/ProyectoFinal/Middlewares/Third_Party/FreeRTOS/Source/timers.c \
  ../../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h \
  ../Core/Inc/FreeRTOSConfig.h \
  ../../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h \

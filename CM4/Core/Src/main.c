@@ -26,6 +26,7 @@
 /* USER CODE BEGIN Includes */
 #include "BMP180.h"
 #include "queue.h"
+#include "common.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -78,27 +79,25 @@ I2C_HandleTypeDef hi2c1;
 
 UART_HandleTypeDef huart3;
 
-osThreadId defaultTaskHandle;
-osThreadId LeerSensorHandle;
 osThreadId controlTaskHandle;
+osThreadId LeerSensorHandle;
 osMessageQId lecturaSensorHandle;
-osMessageQId compresorQueueHandle;
-osMessageQId valvulaQueueHandle;
 /* USER CODE BEGIN PV */
 
-QueueHandle_t compresor2Handle;
-QueueHandle_t controlQueueHandle;
-QueueHandle_t valvula2Handle;
-MessageBufferHandle_t control2cm7;
+/* Ringbuffer variables */
+volatile ringbuff_t* bombaAire = (void *)BUFF_CM4_TO_CM7_ADDR;
+volatile ringbuff_t* valvula = (void *)BUFF_CM7_TO_CM4_ADDR;
+
+/*QueueHandle*/
+QueueHandle_t controlQueueHandle =0;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
-void StartDefaultTask(void const * argument);
-void LeerSensor_Init(void const * argument);
 void control_Init(void const * argument);
+void LeerSensor_Init(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -120,18 +119,14 @@ int main(void)
   /* USER CODE END 1 */
 
 /* USER CODE BEGIN Boot_Mode_Sequence_1 */
-  /*HW semaphore Clock enable*/
-  __HAL_RCC_HSEM_CLK_ENABLE();
-  /* Activate HSEM notification for Cortex-M4*/
-  HAL_HSEM_ActivateNotification(__HAL_HSEM_SEMID_TO_MASK(HSEM_ID_0));
-  /*
-  Domain D2 goes to STOP mode (Cortex-M4 in deep-sleep) waiting for Cortex-M7 to
-  perform system initialization (system clock config, external memory configuration.. )
-  */
-  HAL_PWREx_ClearPendingEvent();
-  HAL_PWREx_EnterSTOPMode(PWR_MAINREGULATOR_ON, PWR_STOPENTRY_WFE, PWR_D2_DOMAIN);
-  /* Clear HSEM flag */
-  __HAL_HSEM_CLEAR_FLAG(__HAL_HSEM_SEMID_TO_MASK(HSEM_ID_0));
+	/* CPU2 goes to STOP mode and waits CPU1 to initialize all the steps first */
+	/* CPU1 will wakeup CPU2 with semaphore take and release events */
+	/* HW semaphore Clock enable */
+	__HAL_RCC_HSEM_CLK_ENABLE();
+	HAL_HSEM_ActivateNotification(HSEM_WAKEUP_CPU2_MASK);
+	HAL_PWREx_ClearPendingEvent();
+	HAL_PWREx_EnterSTOPMode(PWR_MAINREGULATOR_ON, PWR_STOPENTRY_WFE, PWR_D2_DOMAIN);
+	__HAL_HSEM_CLEAR_FLAG(HSEM_WAKEUP_CPU2_MASK);
 
 /* USER CODE END Boot_Mode_Sequence_1 */
   /* MCU Configuration--------------------------------------------------------*/
@@ -151,7 +146,7 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-
+  while (!ringbuff_is_ready(bombaAire) || !ringbuff_is_ready(valvula)) {}
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -171,34 +166,20 @@ int main(void)
   osMessageQDef(lecturaSensor, 16, uint16_t);
   lecturaSensorHandle = osMessageCreate(osMessageQ(lecturaSensor), NULL);
 
-  /* definition and creation of compresorQueue */
-  osMessageQDef(compresorQueue, 16, uint16_t);
-  compresorQueueHandle = osMessageCreate(osMessageQ(compresorQueue), NULL);
-
-  /* definition and creation of valvulaQueue */
-  osMessageQDef(valvulaQueue, 16, uint16_t);
-  valvulaQueueHandle = osMessageCreate(osMessageQ(valvulaQueue), NULL);
-
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
-  compresor2Handle = xQueueCreate(1, sizeof(int));
   controlQueueHandle = xQueueCreate(1, sizeof(int));
-  valvula2Handle = xQueueCreate(1, sizeof(int));
-  control2cm7=xMessageBufferCreate( sizeof(int) );
+
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* definition and creation of defaultTask */
-  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
-  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
+  /* definition and creation of controlTask */
+  osThreadDef(controlTask, control_Init, osPriorityHigh, 0, 128);
+  controlTaskHandle = osThreadCreate(osThread(controlTask), NULL);
 
   /* definition and creation of LeerSensor */
   osThreadDef(LeerSensor, LeerSensor_Init, osPriorityHigh, 0, 128);
   LeerSensorHandle = osThreadCreate(osThread(LeerSensor), NULL);
-
-  /* definition and creation of controlTask */
-  osThreadDef(controlTask, control_Init, osPriorityIdle, 0, 128);
-  controlTaskHandle = osThreadCreate(osThread(controlTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -215,7 +196,6 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
   }
   /* USER CODE END 3 */
 }
@@ -370,21 +350,9 @@ void MX_USART3_UART_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
 
   /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOG_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOG, GPIO_PIN_14, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : PG14 */
-  GPIO_InitStruct.Pin = GPIO_PIN_14;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
 
 }
 
@@ -392,21 +360,47 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_StartDefaultTask */
+/* USER CODE BEGIN Header_control_Init */
 /**
-  * @brief  Function implementing the defaultTask thread.
+  * @brief  Function implementing the controlTask thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void const * argument)
+/* USER CODE END Header_control_Init */
+void control_Init(void const * argument)
 {
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
+  int pr=0;
+  char comp='0';
+  char val='0';
+  osEvent evt;
+  //float *getVal;
+
+  //Borrar cuando se realize comunicacion CAN
+  int pEsp=10;
+
   for(;;)
   {
-	  HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_14);
-	  osDelay(3000);
+	//Receive queue
+	//while(!xQueueReceive(controlQueueHandle,&p,1000));
+	evt = osMessageGet(lecturaSensorHandle,osWaitForever);
+	if (evt.status == osEventMessage) {
+		pr=evt.value.v;
+		//pr=*getVal;
+		if (pr<pEsp){
+			comp='1';
+			val='0';
+		}else if(pr>pEsp){
+			comp='0';
+			val='1';
+		}
+		//xQueueSend(compresor2Handle,&comp,0);
+		ringbuff_write(bombaAire, &comp, 1);
+		//xQueueSend(valvula2Handle,&val,0);
+		ringbuff_write(valvula, &val, 1);
+	}
+
   }
   /* USER CODE END 5 */
 }
@@ -421,52 +415,27 @@ void StartDefaultTask(void const * argument)
 void LeerSensor_Init(void const * argument)
 {
   /* USER CODE BEGIN LeerSensor_Init */
-  float p=0;
-  int go=200;
+  float p=5;
+  //float *pr;
+  //int go=200;
   /* Infinite loop */
   for(;;)
   {
-	p=BMP180_calculate_true_pressure(0);
-	xQueueSend(controlQueueHandle,&p,0);
+	//p=BMP180_calculate_true_pressure(0);
+	if (p==15){
+		p=5;
+	}else{
+		p=15;
+	}
+	//pr=&p;
+	//xQueueSend(controlQueueHandle,&p,1000);
+	osMessagePut(lecturaSensorHandle, (uint32_t)p,osWaitForever);
 	//Utilizada para can
 
 	//Para llamar a Sensor
-    osDelay(500);
+	osDelay(1000);
   }
   /* USER CODE END LeerSensor_Init */
-}
-
-/* USER CODE BEGIN Header_control_Init */
-/**
-* @brief Function implementing the controlTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_control_Init */
-void control_Init(void const * argument)
-{
-  /* USER CODE BEGIN control_Init */
-  /* Infinite loop */
-  int p=0;
-  int comp=0;
-  int val=0;
-  //Borrar cuando se realize comunicacion CAN
-  int pEsp=10;
-  for(;;)
-  {
-	//Receive queue
-	while(!xQueueReceive(controlQueueHandle,&p,1000));
-	if (p<pEsp){
-		comp=1;
-		val=0;
-	}else if(p>pesp){
-		comp=0;
-		val=1;
-	}
-	xQueueSend(compresor2Handle,&comp,0);
-	xQueueSend(valvula2Handle,&val,0);
-  }
-  /* USER CODE END control_Init */
 }
 
 /**
